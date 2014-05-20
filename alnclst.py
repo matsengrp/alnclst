@@ -4,14 +4,16 @@ recentering."""
 
 __version__ = "0.1.1"
 
-import itertools
 __verbose__ = False
+
+import itertools as it
 from numpy import mean
 from Bio import SeqIO, Align, SeqRecord
 from Bio.Align import AlignInfo
 import argparse
 import random
 import csv
+import sys
 
 
 def hamming_dist(seq1, seq2):
@@ -50,6 +52,10 @@ class Clustering(object):
                 new_cluster = Cluster(record, consensus_threshold)
                 self.clusters.append(new_cluster)
 
+    def __repr__(self):
+        return "Clustering(size %s):[\n%s\n]" % (len(self.clusters),
+                "\n".join("    " + str(c) for c in self.sorted_clusters()))
+
     def merge_small_clusters(self, min_per_cluster):
         """Merges the smallest clusters with nearest neighbours until no cluster is smaller than min_per_cluster"""
         while any(c.size() < min_per_cluster for c in self.clusters):
@@ -73,7 +79,7 @@ class Clustering(object):
         in order of sorted_clusters. Next it yields each of the next most central members from each cluster,
         again in order of sorted clusters. It does this till there are no more cluster members."""
         cluster_iterators = (c.recenter_iterator() for c in self.sorted_clusters())
-        return (r for r in itertools.chain(*itertools.izip_longest(*cluster_iterators)) if r)
+        return (r for r in it.chain(*it.izip_longest(*cluster_iterators)) if r)
 
     def recenter(self, n):
         """Does the requested number of recenterings."""
@@ -98,11 +104,16 @@ class KMeansClsutering(Clustering):
         print "Running KMeans for K=", k
         self.seqrecords = [sr for sr in seqrecords]
         self.clusters = [Cluster(sr, consensus_threshold) for sr in random.sample(self.seqrecords, k)]
-        last_centers = []
+        last_clustering = []
         itercount = 0
-        while last_centers != self.sorted_centroids() and itercount < max_iters:
+        while last_clustering != self.sorted_membernames() and itercount < max_iters:
+            if __verbose__:
+                print "On loop", itercount
+                print self
+                print ""
             itercount += 1
-            last_centers = self.sorted_centroids()
+            last_clustering = self.sorted_membernames()
+            self.reseed_empties()
             for c in self.clusters:
                 c.recenter()
                 c.members = []
@@ -111,8 +122,18 @@ class KMeansClsutering(Clustering):
                 clst.add(sr)
         print "KMeans completed in", itercount, "iterations"
 
-    def sorted_centroids(self):
-        return sorted([c.centroid for c in self.clusters])
+    def reseed_empties(self):
+        empty_clusters = filter(lambda c: c.size() == 0, self.clusters)
+        if empty_clusters:
+            sys.stderr.write("Doing a reseed\n")
+            print "Doing a reseed\n"
+            dist_sort = sorted((-c.distance(m), m, c) for c in self.clusters for m in c.members)
+            for (_, distal_m, distal_c), empty_c in it.izip(dist_sort, empty_clusters):
+                distal_c.members.remove(distal_m)
+                empty_c.add(distal_m)
+                
+    def sorted_membernames(self):
+        return [sorted([m.name for m in c.members]) for c in self.sorted_clusters()]
 
 
 class Cluster(object):
@@ -124,6 +145,11 @@ class Cluster(object):
         self.members = list()
         if self.centroid.name != 'consensus':
             self.members.append(centroid)
+
+    def __repr__(self):
+        return "Cluster(size: %s members: %s centroid: %s)" % (self.size(),
+                sorted([m.name for m in self.members]),
+                self.centroid.seq)
 
     def distance(self, record):
         """Simple hamming distance between rep/center and seq arg."""
