@@ -13,7 +13,6 @@ from Bio.Align import AlignInfo
 import argparse
 import random
 import csv
-import sys
 
 
 def hamming_dist(seq1, seq2):
@@ -122,11 +121,18 @@ class KMeansClsutering(Clustering):
                 clst.add(sr)
         print "KMeans completed in", itercount, "iterations"
 
+    def average_distance(self):
+        result = mean([c.distance(m) for c in self.clusters for m in c.members])
+        info_str = "Average dist: %s\n" % result
+        if __verbose__:
+            print info_str
+        return result
+
     def reseed_empties(self):
         empty_clusters = filter(lambda c: c.size() == 0, self.clusters)
         if empty_clusters:
-            sys.stderr.write("Doing a reseed\n")
-            print "Doing a reseed\n"
+            if __verbose__:
+                print "Doing a reseed\n"
             dist_sort = sorted((-c.distance(m), m, c) for c in self.clusters for m in c.members)
             for (_, distal_m, distal_c), empty_c in it.izip(dist_sort, empty_clusters):
                 distal_c.members.remove(distal_m)
@@ -214,9 +220,17 @@ def threshold_handler(args):
 
 
 def kmeans_handler(args):
-    seqrecords = SeqIO.parse(args.alignment, 'fasta')
-    clustering = KMeansClsutering(seqrecords, args.k, args.consensus_threshold, args.max_iters)
-    clustering.write(args.output)
+    def clustering(args):
+        seqrecords = SeqIO.parse(args.alignment, 'fasta')
+        return KMeansClsutering(seqrecords, args.k, args.consensus_threshold, args.max_iters)
+
+    if args.batches:
+        print "Starting new batch"
+        _, clusts = min((c.average_distance(), c) for c in (clustering(args) for i in xrange(args.batches)))
+    else:
+        clusts = clustering(args)
+
+    clusts.write(args.output)
 
 
 def add_common_args(parser):
@@ -244,6 +258,9 @@ def get_args():
     kmeans_parser.add_argument('-k', type=int, required=True, help="Number of clusters")
     kmeans_parser.add_argument('-M', '--max-iters', type=int, default=100,
         help="Maximum number of iterations.")
+    kmeans_parser.add_argument('-b', '--batches', type=int,
+        help="""Perform this many kmeans, and take the one with the smallest average_distance from cluster
+        centers to corresponding members.""")
     kmeans_parser.set_defaults(func=kmeans_handler)
 
     add_common_args(threshold_parser)
