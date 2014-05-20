@@ -2,13 +2,15 @@
 """Alnclst: A simple UCLUST-like clustering algorithm for pre-aligned sequences with built in
 recentering."""
 
-__version__ = "0.0.1"
+__version__ = "0.1.1"
 
 import itertools
+__verbose__ = False
 from numpy import mean
 from Bio import SeqIO, Align, SeqRecord
 from Bio.Align import AlignInfo
 import argparse
+import random
 import csv
 
 
@@ -39,6 +41,8 @@ class Clustering(object):
             try:
                 min_dist, clst = min((c.distance(record), c) for c in self.clusters)
             except ValueError:
+                # If there aren't any clusters yet, we need to create a new one; this is a somewhat hackish
+                # way of doihng so
                 min_dist = threshold + 1
             if min_dist < threshold:
                 clst.add(record)
@@ -85,6 +89,30 @@ class Clustering(object):
         for row in self.mapping_iterator():
             out_writer.writerow(row)
         handle.close()
+
+
+class KMeansClsutering(Clustering):
+    """This class does a very simple KMeans clustering using some of the machinery of the other two classes.
+    Should really refactor things so there is cleaner code inheritance and reuse."""
+    def __init__(self, seqrecords, k, consensus_threshold, max_iters=50):
+        print "Running KMeans for K=", k
+        self.seqrecords = [sr for sr in seqrecords]
+        self.clusters = [Cluster(sr, consensus_threshold) for sr in random.sample(self.seqrecords, k)]
+        last_centers = []
+        itercount = 0
+        while last_centers != self.sorted_centroids() and itercount < max_iters:
+            itercount += 1
+            last_centers = self.sorted_centroids()
+            for c in self.clusters:
+                c.recenter()
+                c.members = []
+            for sr in self.seqrecords:
+                min_dist, clst = min((c.distance(sr), c) for c in self.clusters)
+                clst.add(sr)
+        print "KMeans completed in", itercount, "iterations"
+
+    def sorted_centroids(self):
+        return sorted([c.centroid for c in self.clusters])
 
 
 class Cluster(object):
@@ -141,24 +169,7 @@ class Cluster(object):
             yield record
 
 
-def get_args():
-    parser = argparse.ArgumentParser(description=__doc__ + " (version: %s)" % __version__)
-    parser.add_argument('alignment', help="In fasta format, sequenced to be clustered")
-    parser.add_argument('output', type=argparse.FileType('w'),
-        help="Output csv file")
-    parser.add_argument('-t', '--threshold', type=float, required=True,
-        help="Roughly speaking, the maximum cluster 'radius', assuming -m is not specified")
-    parser.add_argument('-r', '--recenterings', type=int, default=0,
-        help="Number of recentering steps to perform")
-    parser.add_argument('-c', '--consensus-threshold', type=float, default=0.25,
-        help="Consensus threshold for computing cluster consensus sequences")
-    parser.add_argument('-m', '--min-per-cluster', type=int,
-        help="""Minimum number of sequences allowed in clusters. Clusters smaller than this will be merged
-        with the nearest neighbouring cluster until all clusters are at least this big.""")
-    return parser.parse_args()
-
-
-def main(args):
+def threshold_handler(args):
     # Grab inputs, sort by ungapped length
     seqrecords = SeqIO.parse(args.alignment, 'fasta')
     seqrecords = (x for _, x in sorted((-len(sr.seq.ungap('-')), sr) for sr in seqrecords))
@@ -174,6 +185,58 @@ def main(args):
 
     # Write output
     clustering.write(args.output)
+
+
+def kmeans_handler(args):
+    seqrecords = SeqIO.parse(args.alignment, 'fasta')
+    clustering = KMeansClsutering(seqrecords, args.k, args.consensus_threshold, args.max_iters)
+    clustering.write(args.output)
+
+
+def add_common_args(parser):
+    parser.add_argument('alignment', help="In fasta format, sequenced to be clustered")
+    parser.add_argument('output', type=argparse.FileType('w'),
+        help="Output csv file")
+    parser.add_argument('-c', '--consensus-threshold', type=float, default=0.25,
+        help="Consensus threshold for computing cluster consensus sequences")
+    parser.add_argument('-v', '--verbose', action="store_true",
+        help="Print out information during clustering")
+
+
+def get_args():
+    parser = argparse.ArgumentParser(description=__doc__ + " (version: %s)" % __version__)
+
+    subparsers = parser.add_subparsers(title="clustering method",
+        help="For further help, try `alnclst.py <subcommand> -h`")
+    threshold_parser = subparsers.add_parser("threshold",
+        help="Cluster based on distance thresholds for cluster membership decision; similar to UCLUST")
+    kmeans_parser = subparsers.add_parser("kmeans",
+        help="""KMeans clustering; specify number of clusters a priori and minimize average within
+        cluster distnaces""")
+
+    add_common_args(kmeans_parser)
+    kmeans_parser.add_argument('-k', type=int, required=True, help="Number of clusters")
+    kmeans_parser.add_argument('-M', '--max-iters', type=int, default=100,
+        help="Maximum number of iterations.")
+    kmeans_parser.set_defaults(func=kmeans_handler)
+
+    add_common_args(threshold_parser)
+    threshold_parser.add_argument('-t', '--threshold', type=float, required=True,
+        help="Roughly speaking, the maximum cluster 'radius', assuming -m is not specified")
+    threshold_parser.add_argument('-r', '--recenterings', type=int, default=0,
+        help="Number of recentering steps to perform")
+    threshold_parser.add_argument('-m', '--min-per-cluster', type=int,
+        help="""Minimum number of sequences allowed in clusters. Clusters smaller than this will be merged
+        with the nearest neighbouring cluster until all clusters are at least this big.""")
+    threshold_parser.set_defaults(func=threshold_handler)
+
+    return parser.parse_args()
+
+
+def main(args):
+    global __verbose__
+    __verbose__ = args.verbose
+    args.func(args)
 
 
 if __name__ == '__main__':
