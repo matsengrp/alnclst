@@ -220,6 +220,9 @@ def threshold_handler(args):
 
 
 def kmeans_handler(args):
+    if args.seed:
+        random.seed(args.seed)
+
     def clustering(args):
         seqrecords = SeqIO.parse(args.alignment, 'fasta')
         return KMeansClsutering(seqrecords, args.k, args.consensus_threshold, args.max_iters)
@@ -261,6 +264,8 @@ def get_args():
     kmeans_parser.add_argument('-b', '--batches', type=int,
         help="""Perform this many kmeans, and take the one with the smallest average_distance from cluster
         centers to corresponding members.""")
+    kmeans_parser.add_argument('-s', '--seed',
+        help="Specify random seed for initial set of clusters in NIPALS algorihtm")
     kmeans_parser.set_defaults(func=kmeans_handler)
 
     add_common_args(threshold_parser)
