@@ -2,10 +2,6 @@
 """Alnclst: A simple UCLUST-like clustering algorithm for pre-aligned sequences with built in
 recentering."""
 
-__version__ = "0.1.1"
-
-__verbose__ = False
-
 import itertools as it
 from numpy import mean
 from Bio import SeqIO, Align, SeqRecord
@@ -13,6 +9,10 @@ from Bio.Align import AlignInfo
 import argparse
 import random
 import csv
+
+__version__ = "0.1.1"
+
+__verbose__ = False
 
 
 def hamming_dist(seq1, seq2):
