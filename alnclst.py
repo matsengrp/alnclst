@@ -7,10 +7,11 @@ from numpy import mean
 from Bio import SeqIO, Align, SeqRecord
 from Bio.Align import AlignInfo
 import argparse
+import warnings
 import random
 import csv
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __verbose__ = False
 
@@ -100,9 +101,13 @@ class KMeansClsutering(Clustering):
     """This class does a very simple KMeans clustering using some of the machinery of the other two classes.
     Should really refactor things so there is cleaner code inheritance and reuse."""
     def __init__(self, seqrecords, k, consensus_threshold, max_iters=50):
-        print "Running KMeans for K=", k
         self.seqrecords = [sr for sr in seqrecords]
-        self.clusters = [Cluster(sr, consensus_threshold) for sr in random.sample(self.seqrecords, k)]
+        if len(self.seqrecords) < k:
+            warnings.warn("K is greater than the number of sequences! Setting K = len(sequences).")
+            k = len(self.seqrecords)
+        print "Running KMeans for K=", k
+        self.clusters = [Cluster(sr, consensus_threshold)
+                for sr in random.sample(self.seqrecords, min(k, len(self.seqrecords)))]
         last_clustering = []
         itercount = 0
         while last_clustering != self.sorted_membernames() and itercount < max_iters:
